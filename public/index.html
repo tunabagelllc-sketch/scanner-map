@@ -36,6 +36,10 @@
   .txt { color:var(--muted); font-size:12px; margin-top:4px; }
   .warn { color:#b45309; font-size:12px; }
   .empty { padding:24px 16px; color:var(--muted); }
+  .upload { margin-top:10px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .upload button { border:1px solid var(--border); background:var(--accent); color:#fff; border-radius:8px; padding:6px 12px; font:inherit; font-size:13px; cursor:pointer; }
+  .upload button:disabled { opacity:.6; cursor:default; }
+  .upload span { color:var(--muted); font-size:12px; }
   #map { height:100%; }
   .pulse { border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 2px rgba(0,0,0,.25); }
   @media (max-width: 760px) {
@@ -50,6 +54,11 @@
     <header>
       <h1>Scanner Incident Map</h1>
       <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+      <div class="upload">
+        <button id="uploadBtn" type="button">Upload audio</button>
+        <input id="uploadFile" type="file" accept="audio/*,video/mp4" multiple hidden>
+        <span id="uploadMsg"></span>
+      </div>
     </header>
     <div class="filters" id="filters"></div>
     <ul id="list"></ul>
@@ -179,6 +188,45 @@ function connect() {
 }
 
 setInterval(() => document.querySelectorAll('.time[data-t]').forEach(el => el.textContent = ago(el.dataset.t)), 30000);
+// Upload clips straight from the page. The API key is asked once and kept in this browser only.
+const KEY_STORE = 'scannerApiKey';
+const uploadBtn = document.getElementById('uploadBtn');
+const uploadFile = document.getElementById('uploadFile');
+const uploadMsg = document.getElementById('uploadMsg');
+function storedKey() { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } }
+function storeKey(k) { try { k ? localStorage.setItem(KEY_STORE, k) : localStorage.removeItem(KEY_STORE); } catch {} }
+
+uploadBtn.addEventListener('click', () => {
+  if (!storedKey()) {
+    const k = prompt('Enter your API key (Render → Environment → API_KEY). It stays in this browser.');
+    if (!k) return;
+    storeKey(k.trim());
+  }
+  uploadFile.click();
+});
+
+uploadFile.addEventListener('change', async () => {
+  const files = [...uploadFile.files];
+  uploadFile.value = '';
+  uploadBtn.disabled = true;
+  let ok = 0;
+  for (const [n, f] of files.entries()) {
+    uploadMsg.textContent = `Sending ${files.length > 1 ? `${n + 1} of ${files.length}` : f.name}…`;
+    const form = new FormData();
+    form.append('audio', f);
+    try {
+      const r = await fetch('api/transmissions', { method: 'POST', headers: { 'X-API-Key': storedKey() }, body: form });
+      const body = await r.json().catch(() => ({}));
+      if (r.status === 401) { storeKey(''); uploadMsg.textContent = 'Wrong API key. Click Upload audio to enter it again.'; break; }
+      if (!r.ok) { uploadMsg.textContent = `${f.name}: ${body.error || 'failed (' + r.status + ')'}`; continue; }
+      ok++;
+      onIncident(body);
+    } catch { uploadMsg.textContent = `${f.name}: couldn't reach the server`; }
+  }
+  if (ok === files.length) uploadMsg.textContent = ok === 1 ? 'Sent.' : `Sent ${ok} clips.`;
+  uploadBtn.disabled = false;
+});
+
 loadAll().then(connect).catch(() => setStatus(false, 'Could not load incidents'));
 </script>
 </body>

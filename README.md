@@ -83,6 +83,7 @@ If no location is heard, or the geocoder can't find it, the incident is still st
 - `GET /api/incidents` returns incidents from the last `MAX_AGE_HOURS`.
 - `GET /api/stream` is a server-sent event stream (`incident`, `removed`) the map listens to.
 - `DELETE /api/incidents/:id` removes one (needs the API key).
+- The map page has an **Upload audio** button that sends clips with your API key (kept only in that browser).
 - `GET /health` for uptime checks; also reports whether audio and AI decoding are switched on.
 
 ## How decoding works
