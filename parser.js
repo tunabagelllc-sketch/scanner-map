@@ -51,4 +51,6 @@ function parseTransmission(text) {
 const clean = s => s.replace(/\s+/g, ' ').trim();
 const cap = s => s[0].toUpperCase() + s.slice(1).toLowerCase();
 
-module.exports = { parseTransmission, TYPES, OTHER };
+const colorFor = type => (TYPES.find(t => t.type === type) || OTHER).color;
+
+module.exports = { parseTransmission, colorFor, TYPES, OTHER };

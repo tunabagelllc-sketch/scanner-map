@@ -3,13 +3,17 @@ services:
     name: scanner-incident-map
     runtime: node
     plan: free
-    buildCommand: "true"
+    buildCommand: npm install
     startCommand: node server.js
     healthCheckPath: /health
     envVars:
       - key: API_KEY
         generateValue: true
       - key: AREA
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
         sync: false
       - key: MAX_AGE_HOURS
         value: "24"

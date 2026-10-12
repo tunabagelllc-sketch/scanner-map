@@ -3,7 +3,14 @@
   "version": "1.0.0",
   "description": "Receive radio transmissions over HTTP and plot the incidents on a live map",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" },
-  "license": "MIT"
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  }
 }

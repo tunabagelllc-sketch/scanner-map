@@ -1,9 +1,10 @@
 # Scanner Incident Map
 
-Send radio transmissions (as text) to an HTTP endpoint. Each one is parsed for the incident type,
-the location and the responding units, geocoded with OpenStreetMap, and pushed live to a map page.
+Send radio transmissions (audio clips or text) to an HTTP endpoint. Audio is transcribed with
+OpenAI's Whisper, Claude reads each transmission for the incident type, location and responding units,
+the location is geocoded with OpenStreetMap, and the incident appears live on a map page.
 
-No dependencies. Needs Node 18 or newer.
+Needs Node 18 or newer. One dependency (`@anthropic-ai/sdk`).
 
 ## Run it locally
 
@@ -18,9 +19,26 @@ API_KEY=choose-a-secret AREA="Brooklyn, NY" node server.js
 
 `POST /api/transmissions`
 
-Authenticate with `X-API-Key: <API_KEY>` or `Authorization: Bearer <API_KEY>` (skipped when `API_KEY` is unset).
+Audio (mp3, wav, m4a, ogg, webm, flac, up to 25 MB), as a raw body:
 
-Plain text body:
+```bash
+curl -X POST "https://YOUR-HOST/api/transmissions?source=County%20Fire" \
+  -H "X-API-Key: $API_KEY" -H "Content-Type: audio/mpeg" \
+  --data-binary @clip.mp3
+```
+
+or as a form upload with the file in an `audio` field:
+
+```bash
+curl -X POST https://YOUR-HOST/api/transmissions \
+  -H "X-API-Key: $API_KEY" -F "audio=@clip.mp3" -F "source=County Fire"
+```
+
+Audio needs `OPENAI_API_KEY` on the server; without it the endpoint answers `503`.
+
+Text works too:
+
+Authenticate with `X-API-Key: <API_KEY>` or `Authorization: Bearer <API_KEY>` (skipped when `API_KEY` is unset).
 
 ```bash
 curl -X POST https://YOUR-HOST/api/transmissions \
@@ -28,7 +46,7 @@ curl -X POST https://YOUR-HOST/api/transmissions \
   --data-binary "Engine 5, Ladder 3 respond to a working fire at 1420 Oak Street"
 ```
 
-Or JSON, with optional overrides:
+Or JSON, with optional overrides (these also work as query parameters or form fields alongside audio):
 
 ```bash
 curl -X POST https://YOUR-HOST/api/transmissions \
@@ -38,7 +56,7 @@ curl -X POST https://YOUR-HOST/api/transmissions \
 
 | Field      | Required | Meaning |
 |------------|----------|---------|
-| `text`     | yes      | The transmission, as heard |
+| `text`     | yes, unless audio is sent | The transmission, as heard |
 | `source`   | no       | Channel or agency label |
 | `location` | no       | Use this location instead of the one parsed from `text` |
 | `lat`,`lng`| no       | Skip geocoding and place the incident here |
@@ -65,11 +83,15 @@ If no location is heard, or the geocoder can't find it, the incident is still st
 - `GET /api/incidents` returns incidents from the last `MAX_AGE_HOURS`.
 - `GET /api/stream` is a server-sent event stream (`incident`, `removed`) the map listens to.
 - `DELETE /api/incidents/:id` removes one (needs the API key).
-- `GET /health` for uptime checks.
+- `GET /health` for uptime checks; also reports whether audio and AI decoding are switched on.
 
-## How parsing works
+## How decoding works
 
-`parser.js` is rule based:
+With `ANTHROPIC_API_KEY` set, `ai.js` sends each transcript to Claude, which returns the incident type,
+a short summary, the location as spoken, a geocoder-ready query (with your `AREA` filled in), the units,
+and whether it is an incident at all or just radio chatter. Responses carry `"decodedBy": "ai"`.
+
+Without the key, or if Claude can't be reached, `parser.js` falls back to rules (`"decodedBy": "rules"`):
 
 - **Type** from keywords: Shooting, Fire, Crash, Medical, Crime, Hazard, Rescue, otherwise Other.
 - **Location**, in order: an intersection ("Main Street and 5th Avenue", "Elm St & Maple Ave"),
@@ -88,6 +110,10 @@ geocoder rarely resolves intersections, so those fall back to the first street a
 | `AREA`          | none    | Appended to every geocoder query, e.g. `Brooklyn, NY` |
 | `MAX_AGE_HOURS` | 24      | How far back the map shows |
 | `DATA_FILE`     | `data/incidents.json` | Where incidents are saved |
+| `OPENAI_API_KEY` | none | Turns on audio transcription |
+| `ANTHROPIC_API_KEY` | none | Turns on AI decoding |
+| `TRANSCRIBE_MODEL` | `whisper-1` | OpenAI transcription model |
+| `CLAUDE_MODEL` | `claude-opus-5-5` | Claude model used for decoding |
 | `CONTACT_EMAIL` | placeholder | Sent to OpenStreetMap's geocoder, which asks for a contact |
 
 ## Deploy on Render (free)
@@ -101,7 +127,7 @@ On Render's free plan the service sleeps after 15 idle minutes (the next request
 and its disk is wiped on restart, so incidents older than the last restart disappear. A paid instance
 with a persistent disk, or Fly.io / Railway with a volume, keeps them.
 
-## Audio
+## Feeding it from a scanner
 
-This takes text. To feed it audio from a scanner, transcribe first (for example trunk-recorder or
-rdio-scanner with a speech-to-text step) and post each transcript here.
+Each call should be one clip. Tools like trunk-recorder or rdio-scanner already split scanner audio
+into one file per transmission; point their upload hook (or a small script) at `/api/transmissions`.

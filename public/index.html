@@ -81,6 +81,7 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s ?? 
 
 function popupHtml(i) {
   return `<b>${esc(i.type)}</b> · ${esc(new Date(i.receivedAt).toLocaleTimeString())}<br>` +
+    (i.summary ? `${esc(i.summary)}<br>` : '') +
     `${esc(i.locationText || '')}${i.approximate ? ' <i>(approximate)</i>' : ''}<br>` +
     (i.units?.length ? `Units: ${esc(i.units.join(', '))}<br>` : '') +
     `<small>${esc(i.text)}</small>`;
@@ -110,9 +111,10 @@ function renderList(newId) {
   list.innerHTML = shown.map(i => `
     <li data-id="${i.id}" class="${i.id === newId ? 'new' : ''}">
       <div class="row"><span class="type"><i style="background:${colorOf(i)}"></i>${esc(i.type)}</span><span class="time" data-t="${i.receivedAt}">${ago(i.receivedAt)}</span></div>
+      ${i.summary ? `<div class="loc">${esc(i.summary)}</div>` : ''}
       <div class="loc">${esc(i.locationText || 'No location heard')}${i.approximate ? ' (approx.)' : ''}</div>
       ${i.located ? '' : `<div class="warn">${i.locationText ? "Couldn't place this on the map" : 'Not on map'}</div>`}
-      <div class="txt">${esc(i.text)}</div>
+      <div class="txt">${i.transcribed ? '🎙 ' : ''}${esc(i.text)}</div>
     </li>`).join('');
 }
 
