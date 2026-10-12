@@ -10,6 +10,6 @@ services:
       - key: API_KEY
         generateValue: true
       - key: AREA
-        value: ""
+        sync: false
       - key: MAX_AGE_HOURS
         value: "24"
