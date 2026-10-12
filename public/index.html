@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanner Incident Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --bg:#f8fafc; --panel:#ffffff; --text:#0f172a; --muted:#64748b; --border:#e2e8f0; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1120; --panel:#111827; --text:#e5e7eb; --muted:#94a3b8; --border:#1f2937; --accent:#60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  .app { display:grid; grid-template-columns: 340px 1fr; height:100vh; }
+  aside { background:var(--panel); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
+  header { padding:14px 16px; border-bottom:1px solid var(--border); }
+  h1 { font-size:16px; margin:0 0 4px; }
+  .status { color:var(--muted); font-size:12px; display:flex; align-items:center; gap:6px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#9ca3af; }
+  .dot.live { background:#16a34a; }
+  .filters { display:flex; flex-wrap:wrap; gap:6px; padding:10px 16px; border-bottom:1px solid var(--border); }
+  .chip { border:1px solid var(--border); border-radius:999px; padding:3px 9px; font-size:12px; cursor:pointer; background:transparent; color:var(--text); display:flex; align-items:center; gap:5px; }
+  .chip.off { opacity:.4; }
+  .chip i { width:9px; height:9px; border-radius:50%; display:inline-block; }
+  ul { list-style:none; margin:0; padding:0; overflow:auto; flex:1; }
+  li { padding:10px 16px; border-bottom:1px solid var(--border); cursor:pointer; }
+  li:hover { background:color-mix(in srgb, var(--accent) 8%, transparent); }
+  li.new { animation: flash 2s ease-out; }
+  @keyframes flash { from { background:color-mix(in srgb, var(--accent) 30%, transparent); } to { background:transparent; } }
+  .row { display:flex; justify-content:space-between; gap:8px; }
+  .type { font-weight:600; display:flex; align-items:center; gap:6px; }
+  .type i { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  .time { color:var(--muted); font-size:12px; white-space:nowrap; }
+  .loc { font-size:13px; margin-top:2px; }
+  .txt { color:var(--muted); font-size:12px; margin-top:4px; }
+  .warn { color:#b45309; font-size:12px; }
+  .empty { padding:24px 16px; color:var(--muted); }
+  #map { height:100%; }
+  .pulse { border-radius:50%; border:2px solid #fff; box-shadow:0 0 0 2px rgba(0,0,0,.25); }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 55vh 45vh; }
+    aside { order:2; border-right:none; border-top:1px solid var(--border); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <header>
+      <h1>Scanner Incident Map</h1>
+      <div class="status"><span class="dot" id="dot"></span><span id="status">Connecting…</span></div>
+    </header>
+    <div class="filters" id="filters"></div>
+    <ul id="list"></ul>
+  </aside>
+  <div id="map"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const TYPE_COLORS = { Shooting:'#b91c1c', Fire:'#ea580c', Crash:'#ca8a04', Medical:'#2563eb', Crime:'#7c3aed', Hazard:'#0d9488', Rescue:'#db2777', Other:'#4b5563' };
+const hidden = new Set();
+const markers = new Map();
+let incidents = [];
+let fitted = false;
+
+const map = L.map('map').setView([39.5, -98.35], 4);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+function colorOf(i) { return TYPE_COLORS[i.type] || i.color || TYPE_COLORS.Other; }
+function ago(iso) {
+  const s = Math.round((Date.now() - Date.parse(iso)) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + ' min ago';
+  if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+  return new Date(iso).toLocaleString();
+}
+function esc(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+function popupHtml(i) {
+  return `<b>${esc(i.type)}</b> · ${esc(new Date(i.receivedAt).toLocaleTimeString())}<br>` +
+    `${esc(i.locationText || '')}${i.approximate ? ' <i>(approximate)</i>' : ''}<br>` +
+    (i.units?.length ? `Units: ${esc(i.units.join(', '))}<br>` : '') +
+    `<small>${esc(i.text)}</small>`;
+}
+
+function addMarker(i) {
+  if (!i.located || markers.has(i.id)) return;
+  const m = L.circleMarker([i.lat, i.lng], {
+    radius: 9, color: '#fff', weight: 2, fillColor: colorOf(i), fillOpacity: .9
+  }).bindPopup(popupHtml(i));
+  markers.set(i.id, m);
+  if (!hidden.has(i.type)) m.addTo(map);
+}
+
+function renderFilters() {
+  const types = [...new Set(incidents.map(i => i.type))];
+  document.getElementById('filters').innerHTML = types.map(t => {
+    const n = incidents.filter(i => i.type === t).length;
+    return `<button class="chip ${hidden.has(t) ? 'off' : ''}" data-type="${esc(t)}"><i style="background:${TYPE_COLORS[t] || TYPE_COLORS.Other}"></i>${esc(t)} ${n}</button>`;
+  }).join('');
+}
+
+function renderList(newId) {
+  const list = document.getElementById('list');
+  const shown = incidents.filter(i => !hidden.has(i.type)).slice().reverse();
+  if (!shown.length) { list.innerHTML = '<div class="empty">No incidents yet. Send a transmission to <code>POST /api/transmissions</code> and it will appear here.</div>'; return; }
+  list.innerHTML = shown.map(i => `
+    <li data-id="${i.id}" class="${i.id === newId ? 'new' : ''}">
+      <div class="row"><span class="type"><i style="background:${colorOf(i)}"></i>${esc(i.type)}</span><span class="time" data-t="${i.receivedAt}">${ago(i.receivedAt)}</span></div>
+      <div class="loc">${esc(i.locationText || 'No location heard')}${i.approximate ? ' (approx.)' : ''}</div>
+      ${i.located ? '' : `<div class="warn">${i.locationText ? "Couldn't place this on the map" : 'Not on map'}</div>`}
+      <div class="txt">${esc(i.text)}</div>
+    </li>`).join('');
+}
+
+function render(newId) { renderFilters(); renderList(newId); }
+
+function fitAll() {
+  const pts = incidents.filter(i => i.located).map(i => [i.lat, i.lng]);
+  if (pts.length) { map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 }); fitted = true; }
+}
+
+document.getElementById('filters').addEventListener('click', e => {
+  const b = e.target.closest('.chip'); if (!b) return;
+  const t = b.dataset.type;
+  hidden.has(t) ? hidden.delete(t) : hidden.add(t);
+  for (const i of incidents) {
+    const m = markers.get(i.id); if (!m) continue;
+    if (hidden.has(i.type)) m.remove(); else m.addTo(map);
+  }
+  render();
+});
+
+document.getElementById('list').addEventListener('click', e => {
+  const li = e.target.closest('li'); if (!li) return;
+  const m = markers.get(li.dataset.id);
+  if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 15)); m.openPopup(); }
+});
+
+function onIncident(i) {
+  if (incidents.some(x => x.id === i.id)) return;
+  incidents.push(i);
+  addMarker(i);
+  render(i.id);
+  if (i.located) {
+    if (!fitted) fitAll(); else map.panTo([i.lat, i.lng]);
+    markers.get(i.id)?.openPopup();
+  }
+}
+
+async function loadAll() {
+  const r = await fetch('api/incidents');
+  incidents = await r.json();
+  incidents.forEach(addMarker);
+  render();
+  fitAll();
+}
+
+function setStatus(live, text) {
+  document.getElementById('dot').classList.toggle('live', live);
+  document.getElementById('status').textContent = text;
+}
+
+function connect() {
+  const es = new EventSource('api/stream');
+  es.onopen = () => setStatus(true, 'Live: new incidents appear automatically');
+  es.addEventListener('incident', e => onIncident(JSON.parse(e.data)));
+  es.addEventListener('removed', e => {
+    const { id } = JSON.parse(e.data);
+    incidents = incidents.filter(i => i.id !== id);
+    markers.get(id)?.remove(); markers.delete(id); render();
+  });
+  es.onerror = () => setStatus(false, 'Reconnecting…');
+}
+
+setInterval(() => document.querySelectorAll('.time[data-t]').forEach(el => el.textContent = ago(el.dataset.t)), 30000);
+loadAll().then(connect).catch(() => setStatus(false, 'Could not load incidents'));
+</script>
+</body>
+</html>
